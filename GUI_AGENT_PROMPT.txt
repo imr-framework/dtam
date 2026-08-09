@@ -1,0 +1,302 @@
+# Prompt: Wire the Next.js DTAM GUI to the already-running Twin + ADK APIs
+
+## Role
+
+You maintain the **GUI only** (Vite or Next). The DTAM Python backends live in a **separate repo/location** and are **already started by the human**. Do **not** try to launch `make twin-api`, `make agents-api`, `adk api_server`, or install DTAM from this GUI repo.
+
+Your job: **consume** the two HTTP APIs from the GUI (TELEMETRY tab + AGENTS/chat tab).
+
+## BEFORE YOU CHANGE ANY CODE — ask first
+
+Reply with a short numbered list of questions / requests, then wait for answers (or “proceed with defaults”). Do not implement until then.
+
+Useful questions (adapt as needed):
+
+1. Confirm backend URLs/ports (defaults below) and whether Next **rewrites** or direct browser calls are preferred.
+2. TELEMETRY poll interval (1s / 2s / manual)?
+3. Should TELEMETRY also expose “Run forecast” and “Assess live twin” buttons this iteration?
+4. AGENTS chat: prefer non-streaming `POST /run` first, or SSE `POST /run_sse`?
+5. Fixed `userId` for local demo (e.g. `gui-user`) vs per-browser id?
+6. Any design-system constraints to preserve on the existing TELEMETRY / AGENTS tabs / system console?
+7. Missing backend features you need (auth, CORS for other origins, lighter payloads, push instead of poll, etc.) — list them as **requests to the DTAM owner**, do not invent endpoints.
+
+---
+
+## Assumption: backends are already up
+
+| Service | Default URL | Swagger / OpenAPI | Used by GUI tab |
+| --- | --- | --- | --- |
+| Twin HTTP API | `http://127.0.0.1:8080` | http://127.0.0.1:8080/docs | **TELEMETRY** (+ optional assess) |
+| Google ADK API | `http://127.0.0.1:8001` | http://127.0.0.1:8001/docs | **AGENTS** (chat) |
+
+Verified locally: `GET /list-apps` on ADK returns `["dtam"]`. App name for sessions/run is **`dtam`**.
+
+If a call fails with connection refused, tell the human which backend is down — do not start it yourself.
+
+---
+
+## Next.js connection (GUI repo only)
+
+Prefer same-origin rewrites so the browser only talks to the Next server:
+
+```js
+// next.config.js / next.config.mjs
+async rewrites() {
+  return [
+    { source: "/api/dtam/:path*", destination: "http://127.0.0.1:8080/:path*" },
+    { source: "/api/agents/:path*", destination: "http://127.0.0.1:8001/:path*" },
+  ];
+}
+```
+
+```env
+NEXT_PUBLIC_DTAM_API_URL=/api/dtam
+NEXT_PUBLIC_ADK_API_URL=/api/agents
+NEXT_PUBLIC_ADK_APP_NAME=dtam
+NEXT_PUBLIC_ADK_USER_ID=gui-user
+```
+
+Alternatively call `http://127.0.0.1:8080` and `:8001` directly. Twin API CORS defaults include localhost/127.0.0.1 on **:3000** (Next) and **:5173** (Vite). ADK should be started with matching `--allow_origins` (see `make agents-api` in DTAM).
+
+```text
+GUI (Vite :5173 or Next :3000)
+  ├─ TELEMETRY  →  /api/dtam/*     →  Twin API :8080
+  └─ AGENTS     →  /api/agents/*   →  ADK API  :8001
+```
+
+Do **not** put `GOOGLE_API_KEY` in the Next.js client. Gemini credentials stay on the ADK server process.
+
+---
+
+## TELEMETRY tab — consume Twin API
+
+Physics truth lives here. Poll; do not parse chat text for gauges.
+
+### Endpoints
+
+| Method | Path (after rewrite prefix) | When |
+| --- | --- | --- |
+| GET | `/health` | Connection badge |
+| GET | `/twin/state` | Live poll every 1–2 s |
+| POST | `/twin/forecast` | On-demand forecast form |
+| GET | `/sensors/batch` | Optional raw channels / console |
+| POST | `/assess/from-twin` | Optional structured assessment (no LLM) |
+| POST | `/assess?mode=recommend` | Optional: upload observation JSON |
+
+### GET /twin/state
+
+Returns `SystemState` with `thermal`, `magnetic`, `emi`, `rf`.
+
+Every scalar is usually a `TimestampedQuantity`:
+
+```ts
+{ value, unit, source, timestamp, confidence, uncertainty_std, model_version, channel_id }
+```
+
+`source` ∈ `measured` | `estimated` | `predicted` | `nominal` — **must** stay visible in UI (you already show ESTIMATED / MEASURED).
+
+Resonant frequency is **MHz**. `twin_version` ≈ `phase2b-thermal-emi-rf-v1`.
+
+### POST /twin/forecast
+
+```json
+{
+  "predict_horizon_s": 60,
+  "magnet_setpoint_c": 26,
+  "magnet_heating_rate_c_per_s": 0,
+  "use_thermal_pinn": true
+}
+```
+
+Fills `predicted_*` fields — never label them as measured.
+
+### POST /assess/from-twin
+
+```json
+{ "mode": "observe" }
+```
+
+Response: `{ ok, twin, assessment }`. Use for findings / activated agents / safety — **not** as free-form chat.
+
+### Client sketch (telemetry)
+
+```ts
+const dtam = process.env.NEXT_PUBLIC_DTAM_API_URL ?? "http://127.0.0.1:8080";
+
+export async function fetchTwinState() {
+  const res = await fetch(`${dtam}/twin/state`, { cache: "no-store" });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function runForecast(body: object) {
+  const res = await fetch(`${dtam}/twin/forecast`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function assessFromTwin(body = { mode: "observe" }) {
+  const res = await fetch(`${dtam}/assess/from-twin`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+```
+
+System console: log twin poll successes/errors (as in your current LIVE console). Keep agent transcripts out of this stream unless clearly labeled.
+
+---
+
+## AGENTS tab — consume ADK API (chat)
+
+LLM multi-turn chat with root agent `dtam_supervisor` (app name **`dtam`**).
+
+Discover / confirm contracts anytime at http://127.0.0.1:8001/docs or `/openapi.json`.
+
+### Flow
+
+1. **List apps** (optional sanity check): `GET /list-apps` → expect `"dtam"`.
+2. **Create session** once per chat:
+
+```http
+POST /apps/dtam/users/{userId}/sessions
+Content-Type: application/json
+
+{}
+```
+
+Or with optional body `{ "sessionId": "optional-fixed-id", "state": {} }`.
+
+Response includes `id` (session id), `appName`, `userId`.
+
+3. **Send a user message** — either:
+
+**A. Non-streaming (simpler first):**
+
+```http
+POST /run
+Content-Type: application/json
+
+{
+  "appName": "dtam",
+  "userId": "gui-user",
+  "sessionId": "<id from create session>",
+  "streaming": false,
+  "newMessage": {
+    "role": "user",
+    "parts": [{ "text": "Summarize the current thermal and B0 twin state." }]
+  }
+}
+```
+
+**B. Streaming SSE (nicer UX):**
+
+```http
+POST /run_sse
+Content-Type: application/json
+
+{ ...same RunAgentRequest..., "streaming": true }
+```
+
+Parse the SSE event stream; append model text to the AGENTS transcript.
+
+4. **Reuse** the same `sessionId` for follow-ups (multi-turn).
+5. Optional: `GET /apps/dtam/users/{userId}/sessions/{sessionId}` to reload history.
+
+### Client sketch (agents)
+
+```ts
+const adk = process.env.NEXT_PUBLIC_ADK_API_URL ?? "http://127.0.0.1:8001";
+const appName = process.env.NEXT_PUBLIC_ADK_APP_NAME ?? "dtam";
+const userId = process.env.NEXT_PUBLIC_ADK_USER_ID ?? "gui-user";
+
+export async function createAgentSession(sessionId?: string) {
+  const res = await fetch(`${adk}/apps/${appName}/users/${userId}/sessions`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(sessionId ? { sessionId } : {}),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json(); // { id, appName, userId, ... }
+}
+
+export async function runAgent(sessionId: string, text: string) {
+  const res = await fetch(`${adk}/run`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      appName,
+      userId,
+      sessionId,
+      streaming: false,
+      newMessage: { role: "user", parts: [{ text }] },
+    }),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json(); // event list / run result — inspect live response once
+}
+```
+
+After the first successful `/run`, map the JSON/SSE shape into your chat bubbles (model text parts). If the shape is unclear, log one raw response and adjust — OpenAPI at `:8001/docs` is authoritative.
+
+### Chat UX rules
+
+- AGENTS tab = conversation + optional tool/assessment narrative from the LLM.
+- TELEMETRY numbers always from `/twin/state`, never invented from chat.
+- Do not offer “apply shim / tune hardware / execute control” as real actions.
+- Show a clear error if ADK is unreachable (“Agent API offline on :8001”).
+
+---
+
+## Tab mapping (matches current GUI)
+
+| UI | API |
+| --- | --- |
+| Header badges (`connected`, scanner, mode, twin_version) | Twin `/health` + `/twin/state` |
+| TELEMETRY panels | Twin `/twin/state` (+ forecast/assess on demand) |
+| AGENTS tab | ADK session + `/run` or `/run_sse` |
+| System console | Twin poll / command shortcuts (`status`, `sensors`, …) |
+
+---
+
+## TypeScript notes (telemetry)
+
+Keep reading nested values as `state.thermal?.mean_magnet_temperature_c?.value`.
+
+Assessment (optional) highlights: `activated_agents`, `findings[]`, `approved_recommendations`, `rejected_recommendations`, `safety_decisions`, `overall_confidence`, `explanation`.
+
+Full twin OpenAPI: http://127.0.0.1:8080/docs
+
+---
+
+## Acceptance criteria
+
+1. TELEMETRY updates from Twin API without the GUI starting Python.
+2. Health badge reflects Twin API up/down.
+3. Forecast/assess (if enabled) use Twin API only.
+4. AGENTS can create a session and complete at least one `/run` round-trip when ADK is up.
+5. No Gemini keys in the browser; no fake actuator controls.
+6. Failure modes name which API is down (8080 vs 8001).
+
+---
+
+## Out of scope for the GUI agent
+
+- Cloning or running the DTAM repo
+- Changing DTAM Python / Makefile
+- Embedding Google ADK or torch in Next.js
+
+If you need a new backend route, **ask the human** to add it in DTAM — then consume it.
+
+---
+
+## Reminder
+
+**Ask questions first. Then implement consumption only.** Backends are already running elsewhere.
