@@ -50,3 +50,12 @@ def test_assess_from_twin_scanner() -> None:
     assessment = result["data"]["assessment"]
     assert "activated_agents" in assessment
     assert assessment["overall_confidence"] >= 0.0
+
+
+def test_assess_from_twin_scanner_rejects_scanner_mode() -> None:
+    result = assess_from_twin_scanner(
+        scanner_id="simulated_scanner",
+        mode="simulation",
+    )
+    assert result["ok"] is False
+    assert "observe" in result["error"]

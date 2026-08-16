@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 class Settings(BaseModel):
     """Non-secret runtime settings for the digital twin agents."""
 
-    model: str = Field(default="gemini-2.5-flash-lite", description="LLM model id")
+    model: str = Field(default="gemini-2.5-flash", description="LLM model id")
     default_mode: str = Field(default="observe")
     log_level: str = Field(default="INFO")
     max_workflow_iterations: int = Field(default=3, ge=1, le=20)
@@ -55,7 +55,7 @@ def _env_bool(name: str, default: bool) -> bool:
 def get_settings() -> Settings:
     """Load settings from process environment. Does not read secret values into logs."""
     return Settings(
-        model=os.getenv("DT_MODEL", "gemini-2.0-flash"),
+        model=os.getenv("DT_MODEL", "gemini-2.5-flash"),
         default_mode=os.getenv("DT_DEFAULT_MODE", "observe"),
         log_level=os.getenv("DT_LOG_LEVEL", "INFO"),
         max_workflow_iterations=int(os.getenv("DT_MAX_WORKFLOW_ITERATIONS", "3")),
