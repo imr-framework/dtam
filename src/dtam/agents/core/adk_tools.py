@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import base64
 import json
 from typing import Any
+
+from google.adk.tools.tool_context import ToolContext
 
 from .enums import OperatingMode
 from .models import DigitalTwinObservation, ProposedAction
@@ -155,3 +158,53 @@ def run_safety_validation(actions_json: str, mode: str = "recommend") -> dict[st
         "decisions": [d.model_dump(mode="json") for d in decisions],
         "assessment": assessment.model_dump(mode="json"),
     }
+
+
+async def plot_twin_forecast_for_chat(
+    scanner_id: str = "simulated_scanner",
+    predict_horizon_s: float = 60.0,
+    n_points: int = 9,
+    magnet_heating_rate_c_per_s: float = 0.0,
+    magnet_setpoint_c: float = 0.0,
+    tool_context: ToolContext | None = None,
+) -> dict[str, Any]:
+    """Plot a twin forecast trajectory for chat UIs (PNG + series).
+
+    Call this for forecast / prediction / \"what will happen\" questions.
+    Returns series data and ``plot_png_base64``. When ADK ToolContext is
+    available, also saves an ``image/png`` session artifact. Do not paste
+    base64 into the assistant text — the GUI renders the image from the
+    tool / artifact response.
+    """
+    from google.genai import types
+
+    from dtam.tools.state_estimation.forecast_plot import plot_twin_forecast
+
+    result = plot_twin_forecast(
+        scanner_id=scanner_id,
+        predict_horizon_s=predict_horizon_s,
+        n_points=n_points,
+        magnet_heating_rate_c_per_s=magnet_heating_rate_c_per_s,
+        magnet_setpoint_c=magnet_setpoint_c,
+    )
+    if not result.get("ok", False):
+        return result
+
+    data = result.get("data") or {}
+    b64 = data.get("plot_png_base64")
+    filename = data.get("plot_filename") or "twin_forecast.png"
+    if tool_context is not None and b64:
+        try:
+            png_bytes = base64.b64decode(b64)
+            artifact = types.Part.from_bytes(data=png_bytes, mime_type="image/png")
+            version = await tool_context.save_artifact(
+                filename=filename,
+                artifact=artifact,
+            )
+            data["artifact_name"] = filename
+            data["artifact_version"] = version
+        except Exception as exc:  # noqa: BLE001
+            data["artifact_error"] = str(exc)
+
+    return result
+

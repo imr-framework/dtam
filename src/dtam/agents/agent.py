@@ -4,7 +4,11 @@ from __future__ import annotations
 
 from google.adk.agents import Agent
 
-from dtam.agents.core.adk_tools import assess_digital_twin, assess_from_twin_scanner
+from dtam.agents.core.adk_tools import (
+    assess_digital_twin,
+    assess_from_twin_scanner,
+    plot_twin_forecast_for_chat,
+)
 from dtam.agents.core.config import get_settings
 from dtam.agents.core.observability import after_agent_callback, before_agent_callback
 from dtam.agents.emi_agent.agent import emi_agent
@@ -23,6 +27,9 @@ _ROOT_INSTRUCTION = (
     "- Prefer assess_from_twin_scanner for live simulated/adapter twin snapshots.\n"
     "- Prefer assess_digital_twin when the user supplies observation JSON.\n"
     "- Use estimate_twin_state / PINN tools via orchestrator skills for physics truth.\n"
+    "- For forecast / prediction / \"what will happen\" questions, call "
+    "plot_twin_forecast_for_chat, explain the thermal and f0 curves, and clearly "
+    "label predicted vs measured/estimated. Do not paste plot_png_base64 into text.\n"
     "- Delegate to specialists for domain depth (thermal, magnet, EMI, RF, B1, "
     "gradient, motion, safety).\n"
     "- Closed-loop hardware control remains off by default; safety policy is final."
@@ -40,6 +47,7 @@ root_agent = Agent(
         skill_toolset_for_agent("orchestrator"),
         assess_digital_twin,
         assess_from_twin_scanner,
+        plot_twin_forecast_for_chat,
     ],
     sub_agents=[
         thermal_agent,

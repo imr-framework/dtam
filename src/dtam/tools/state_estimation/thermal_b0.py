@@ -9,7 +9,7 @@ from dtam.config.loader import load_runtime_settings
 from dtam.digital_twin.models.thermal import ThermalToB0Params
 from dtam.digital_twin.service import ThermalMagneticTwin, TwinConfig
 from dtam.scanner_adapters import create_scanner_adapter
-from dtam.tools.base import ToolFn, error_result, ok_result
+from dtam.tools.base import error_result, ok_result
 
 
 def _run_twin_update(
@@ -165,8 +165,3 @@ def _thermal_b0_payload(tool: str, state: Any) -> dict[str, Any]:
         snapshot_json=json.loads(state.model_dump_json()),
     )
 
-
-STATE_ESTIMATION_TOOLS: list[ToolFn] = [
-    estimate_twin_state,
-    estimate_thermal_b0_state,
-]
