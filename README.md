@@ -1,4 +1,13 @@
+<div align="center">
+
 # DTAM
+
+![Python](https://img.shields.io/badge/python-v3.10+-blue.svg)
+![Google ADK](https://img.shields.io/badge/Google%20ADK-Latest-green.svg)
+![MCP](https://img.shields.io/badge/MCP-Model%20Context%20Protocol-blue.svg)
+![Development Status](https://img.shields.io/badge/status-Alpha-yellow.svg)
+
+</div>
 
 **Digital Twin Architecture for MRI** — physics-informed, agentic infrastructure for MRI digital twins.
 
