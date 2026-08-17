@@ -57,17 +57,16 @@ Details: [Twin HTTP API](docs/platform/twin-api.md), [Getting started](docs/star
 
 ```bash
 uv run pytest tests/unit tests/integration/test_foundation_bootstrap.py -q
-make test         # full pytest suite
+make test
 make lint
 make typecheck
-make check        # lint + typecheck + test
+make check
 ```
 
 ## Docs site
 
 ```bash
-make docs-serve   # local preview
-make docs         # strict build → site/
+make docs-serve
 ```
 
 ## AI models
