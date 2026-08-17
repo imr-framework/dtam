@@ -24,12 +24,6 @@ Full documentation lives in [`docs/`](docs/) (preview with `make docs-serve`). T
 uv sync --all-groups
 ```
 
-For agent / Gemini calls, set a Google API key in the repo-root `.env` (see `src/dtam/agents/.env.example`):
-
-```bash
-GOOGLE_API_KEY=your-key-here
-```
-
 ## Smoke test
 
 ```bash
@@ -42,23 +36,19 @@ Example output:
 DTAM ready scanner=simulated_scanner mode=simulation sensors=3 measurements=3 ...
 ```
 
-Or from Python:
-
-```python
-from dtam import bootstrap
-
-app = bootstrap(scanner_id="simulated_scanner", environment="testing")
-batch = app.adapter.read_measurements()
-print(app.adapter.scanner_id, len(batch.measurements), batch.correlation_id)
-```
-
 ## Servers
+Run the following servers (use different terminals for each).
+These servers also directly serve `Adelpha` if you are using it for you digital twin GUI.
 
 ```bash
-make twin-api     # Twin REST API → http://127.0.0.1:8080
-make agents-api   # ADK agent API (GUI chat) → :8001
-make web          # ADK web UI → :8001
-make api          # ADK api_server (default port)
+make twin-api
+make agents-api
+```
+
+### Other servers
+```bash
+make web
+make api
 ```
 
 Details: [Twin HTTP API](docs/platform/twin-api.md), [Getting started](docs/start/index.md).
@@ -78,6 +68,13 @@ make check        # lint + typecheck + test
 ```bash
 make docs-serve   # local preview
 make docs         # strict build → site/
+```
+
+## AI models
+For agent / Gemini calls, set a Google API key in the repo-root `.env` (see `src/dtam/agents/.env.example`):
+
+```bash
+GOOGLE_API_KEY=your-key-here
 ```
 
 ## Optional extras
